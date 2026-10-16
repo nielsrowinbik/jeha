@@ -115,4 +115,72 @@ display_name = "Bad"
         let config: AppConfig = toml::from_str(toml_str).unwrap();
         assert!(validate::validate_config(&config).is_err());
     }
+
+    #[test]
+    fn test_winter_mode_config() {
+        let toml_str = r#"
+schema_version = 1
+
+[general]
+latitude = 59.33
+
+[circadian.defaults.winter]
+start_brightness = 240
+
+[rooms.kitchen]
+z2m_group = "Kitchen"
+
+[rooms.bedroom]
+z2m_group = "Bedroom"
+
+[rooms.bedroom.circadian.winter]
+end_brightness = 60
+"#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        validate::validate_config(&config).unwrap();
+        assert_eq!(config.general.latitude, Some(59.33));
+
+        let defaults = &config.circadian.defaults;
+        assert_eq!(defaults.winter_targets(), (240, 254, 77));
+
+        let kitchen = config.rooms["kitchen"].effective_circadian(defaults);
+        assert_eq!(kitchen.winter_targets(), (240, 254, 77));
+
+        let bedroom = config.rooms["bedroom"].effective_circadian(defaults);
+        assert_eq!(bedroom.winter_targets(), (240, 254, 60));
+    }
+
+    #[test]
+    fn test_winter_defaults_follow_regular_curve() {
+        let toml_str = r#"
+schema_version = 1
+
+[rooms.den]
+z2m_group = "Den"
+
+[rooms.den.circadian]
+start_brightness = 250
+end_brightness = 20
+"#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        let den = config.rooms["den"].effective_circadian(&config.circadian.defaults);
+        // Bedtime keeps the room's own end brightness; the default winter start
+        // never dims a room that is already brighter than it.
+        assert_eq!(den.winter_targets(), (250, 254, 20));
+
+        let defaults = &config.circadian.defaults;
+        assert_eq!(defaults.winter_targets(), (230, 254, 77));
+    }
+
+    #[test]
+    fn test_invalid_latitude() {
+        let toml_str = r#"
+schema_version = 1
+
+[general]
+latitude = 95.0
+"#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        assert!(validate::validate_config(&config).is_err());
+    }
 }

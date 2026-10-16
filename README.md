@@ -77,6 +77,8 @@ external_brightness_tolerance = 15    # Brightness drift before detecting extern
 external_color_temp_tolerance = 25    # Color temp drift (mired) before detecting external change
 external_override_secs = 1800         # How long to pause circadian after external change (30 min)
 remote_brightness_step = 25           # Remote dim up/down step (perceptual, ~10% per press); hold ramps at 2x this per second
+latitude = 59.33                      # Winter mode; looked up automatically if unset (see below)
+geoip_lookup = true                   # Look up latitude from GeoIP when unset
 ```
 
 ### Circadian defaults
@@ -117,6 +119,50 @@ circadian_enabled = false
 ```
 
 jeha auto-discovers new Z2M groups with lights and appends them to the config file. Restart or send SIGHUP to apply.
+
+### Winter mode
+
+Winter is darker than summer, so the same indoor light feels dimmer in December than in June. jeha lifts circadian brightness as the days get shorter at your location. It's on by default and needs no configuration.
+
+On first start, jeha looks up its approximate location from its public IP via `https://geoip.vpetersson.com/`. It then writes the latitude, rounded to city level, into `[general]` in the config file, so the lookup only happens once:
+
+```toml
+[general]
+latitude = 59.33  # Set automatically from GeoIP — edit if wrong
+```
+
+Edit the value if the guess is off (VPNs and some ISPs geolocate to the wrong city), or set it yourself up front to skip the lookup. Use decimal degrees, negative for the southern hemisphere. If the lookup fails, jeha starts normally with winter mode off and tries again on the next start. If the config file is read-only, the latitude is used for this run only. To turn off the lookup entirely:
+
+```toml
+[general]
+geoip_lookup = false          # No network lookup; winter mode only if latitude is set
+```
+
+Brightness changes gradually through the year, not as a winter/summer switch. Every day, jeha works out that day's daylight hours at your latitude and blends between the regular brightness (18 hours of daylight or more) and the winter values (6 hours or less). The `winter` values are the target for the darkest days; most days sit somewhere in between. Wake-up brightness (`start_brightness`, regular 150, winter 230) through the year:
+
+| | Jan | Feb | Mar | Apr | May | Jun | Jul | Aug | Sep | Oct | Nov | Dec |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Stockholm | 225 | 209 | 193 | 174 | 157 | 150 | 151 | 166 | 185 | 203 | 220 | 229 |
+| London | 215 | 204 | 192 | 178 | 166 | 159 | 162 | 173 | 186 | 200 | 212 | 218 |
+| Madrid | 206 | 199 | 191 | 182 | 174 | 170 | 171 | 178 | 187 | 196 | 204 | 208 |
+
+Near the equator (about 12 hours of daylight all year) it stays at about halfway (189). The southern hemisphere works the same way, with the seasons flipped. With no latitude (lookup off or failed), brightness is the same all year.
+
+Only brightness is adjusted, and only during the morning and day: the evening wind-down is the same all year. Wake and sleep times stay fixed, because they follow your schedule, not the sun. See [ADR-0004](doc/adr/0004-circadian-brightness-levels.md) for how the levels were chosen. Winter defaults:
+
+```toml
+[circadian.defaults.winter]
+start_brightness = 230        # Dark mornings: wake up to more light (or the regular value, if higher)
+peak_brightness = 254         # Midday (regular: 254)
+# end_brightness = …           # Unset: follows the regular end_brightness, so bedtime is never lifted
+```
+
+Override per room:
+
+```toml
+[rooms.bedroom.circadian.winter]
+start_brightness = 180        # Gentler winter wake-up in the bedroom
+```
 
 ### Night mode
 
@@ -284,7 +330,7 @@ Errors use HTTP status codes (400, 404, 500) with `{"error": "message"}` body.
 
 ## Circadian curve
 
-Cosine interpolation between three points: wake (warm), midday (cool), sleep (warmest). 30-second transitions between updates make changes imperceptible. Configurable per room. Can be disabled per room with `circadian_enabled = false`.
+Cosine interpolation between three points: wake (warm), midday (cool), sleep (warmest). 30-second transitions between updates make changes imperceptible. With `general.latitude` set, brightness at each point is lifted on short winter days (see [Winter mode](#winter-mode)). Configurable per room. Can be disabled per room with `circadian_enabled = false`.
 
 ## Remote control bindings
 
